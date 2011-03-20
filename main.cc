@@ -317,13 +317,12 @@ namespace {
 
 void play_thread()
 {
-	const int samplerate = 44100;
-
 	input_plugin *input = NULL;
 	output_plugin *output = NULL;
 
 	std::vector<sample_t> playbuf;
 	size_t played = 0;
+	audio_format fmt = {0, 0};
 
 	while (1) {
 		Glib::Mutex::Lock lock(*play_mutex);
@@ -350,16 +349,6 @@ void play_thread()
 			}
 			current->adjust(1);
 		}
-		if (output == NULL) {
-			output = new alsa_output;
-			if (output->open()) {
-				delete output;
-				output = NULL;
-				warning("Unable to open audio output");
-				state = STOP;
-				continue;
-			}
-		}
 
 		if (toseek) {
 			if (input->seek(toseek)) {
@@ -368,18 +357,12 @@ void play_thread()
 			toseek = 0;
 		}
 
-		const int RATING_SEC = 20;
-
-		if (played >= samplerate * RATING_SEC * 2) {
-			played -= samplerate * RATING_SEC * 2;
-			current->adjust(1);
-		}
-
 		lock.release();
-		std::vector<sample_t> buf = input->decode();
+		audio_format new_fmt;
+		std::vector<sample_t> buf = input->decode(&new_fmt);
 		if (buf.empty()) {
-			output->play(playbuf);
-			playbuf.clear();
+			if (output)
+				output->play(fmt, playbuf);
 
 			lock.acquire();
 			current->adjust(1);
@@ -393,12 +376,30 @@ void play_thread()
 					state = STOP;
 			} else
 				state = STOP;
+			playbuf.clear();
 			continue;
 		}
 
+		if (output == NULL || memcmp(&fmt, &new_fmt, sizeof fmt) != 0) {
+			if (output)
+				output->play(fmt, playbuf);
+			delete output;
+			output = new alsa_output;
+			if (output->open(new_fmt)) {
+				delete output;
+				output = NULL;
+				warning("Unable to open audio output");
+				state = STOP;
+				continue;
+			}
+			fmt = new_fmt;
+			playbuf.clear();
+		}
+
 		playbuf.insert(playbuf.end(), buf.begin(), buf.end());
-		if (playbuf.size() >= samplerate / 5 * 2) {
-			ssize_t ret = output->play(playbuf);
+
+		if (playbuf.size() >= fmt.samplerate / 5 * fmt.channels) {
+			ssize_t ret = output->play(fmt, playbuf);
 			if (ret < 0) {
 				delete output;
 				output = NULL;
@@ -408,6 +409,14 @@ void play_thread()
 			}
 			playbuf.erase(playbuf.begin(), playbuf.begin() + ret);
 			played += ret;
+		}
+
+		const int RATING_SEC = 20;
+
+		if (played >= fmt.samplerate * RATING_SEC * fmt.channels) {
+			played -= fmt.samplerate * RATING_SEC * fmt.channels;
+			lock.acquire();
+			current->adjust(1);
 		}
 	}
 }

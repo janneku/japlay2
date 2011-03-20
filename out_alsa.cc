@@ -11,28 +11,29 @@ alsa_output::~alsa_output()
 		snd_pcm_close(m_pcm);
 }
 
-int alsa_output::open()
+int alsa_output::open(const audio_format &fmt)
 {
 	if (snd_pcm_open(&m_pcm, "default", SND_PCM_STREAM_PLAYBACK, 0))
 		return -1;
 	if (snd_pcm_set_params(m_pcm, SND_PCM_FORMAT_S16_LE,
-			SND_PCM_ACCESS_RW_INTERLEAVED, 2, 44100, 1,
-			200000))
+			SND_PCM_ACCESS_RW_INTERLEAVED, fmt.channels,
+			fmt.samplerate, 1, 200000))
 		return -1;
 	return 0;
 }
 
-ssize_t alsa_output::play(const std::vector<sample_t> &buf)
+ssize_t alsa_output::play(const audio_format &fmt,
+			  const std::vector<sample_t> &buf)
 {
 	while (1) {
 		snd_pcm_sframes_t ret =
-			snd_pcm_writei(m_pcm, buf.data(), buf.size() / 2);
+		  snd_pcm_writei(m_pcm, buf.data(), buf.size() / fmt.channels);
 		if (ret < 0) {
 			if (snd_pcm_recover(m_pcm, ret, 1) == 0)
 				continue;
 			break;
 		}
-		return ret * 2;
+		return ret * fmt.channels;
 	}
 	return -1;
 }

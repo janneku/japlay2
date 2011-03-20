@@ -9,8 +9,8 @@ public:
 	alsa_output();
 	~alsa_output();
 
-	int open();
-	ssize_t play(const std::vector<sample_t> &buf);
+	int open(const audio_format &fmt);
+	ssize_t play(const audio_format &fmt, const std::vector<sample_t> &buf);
 
 private:
 	snd_pcm_t *m_pcm;

@@ -93,7 +93,7 @@ int mad_input::seek(int sec)
 	return fill_readbuf();
 }
 
-std::vector<sample_t> mad_input::decode()
+std::vector<sample_t> mad_input::decode(audio_format *fmt)
 {
 	while (1) {
 		if (mad_header_decode(&m_frame.header, &m_stream)) {
@@ -116,16 +116,18 @@ std::vector<sample_t> mad_input::decode()
 
 		m_bitrate = m_frame.header.bitrate;
 
-		std::vector<sample_t> buf(m_synth.pcm.length * 2, 0);
-		if (MAD_NCHANNELS(&m_frame.header) == 2) {
+		fmt->samplerate = m_frame.header.samplerate;
+		fmt->channels = MAD_NCHANNELS(&m_frame.header);
+
+		std::vector<sample_t> buf(m_synth.pcm.length * fmt->channels, 0);
+		if (fmt->channels == 2) {
 			for (size_t i = 0; i < m_synth.pcm.length; ++i) {
 				buf[i*2] = scale(m_synth.pcm.samples[0][i]);
 				buf[i*2+1] = scale(m_synth.pcm.samples[1][i]);
 			}
 		} else {
 			for (size_t i = 0; i < m_synth.pcm.length; ++i) {
-				buf[i*2] =
-				buf[i*2+1] = scale(m_synth.pcm.samples[0][i]);
+				buf[i] = scale(m_synth.pcm.samples[0][i]);
 			}
 		}
 		return buf;

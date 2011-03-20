@@ -13,7 +13,7 @@ public:
 
 	int open(const char *fname);
 	int seek(int sec);
-	std::vector<sample_t> decode();
+	std::vector<sample_t> decode(audio_format *fmt);
 
 private:
 	mad_stream m_stream;
