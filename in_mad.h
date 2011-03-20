@@ -1,7 +1,7 @@
 #ifndef _IN_MAD_H
 #define _IN_MAD_H
 
-#include "common.h"
+#include "plugin.h"
 #include <string>
 #include <stdio.h>
 #include <mad.h>
@@ -12,7 +12,7 @@ public:
 	~mad_input();
 
 	int open(const char *fname);
-	int seek(int msec);
+	int seek(int sec);
 	std::vector<sample_t> decode();
 
 private:
