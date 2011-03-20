@@ -1,4 +1,5 @@
 #include "in_mad.h"
+#include "in_vorbis.h"
 #include "out_alsa.h"
 #include "bencode.h"
 #include "utils.h"
@@ -341,8 +342,13 @@ void play_thread()
 		}
 
 		if (input == NULL) {
-			input = new mad_input;
-			if (input->open(current->fname.c_str())) {
+			size_t p = current->title.rfind('.');
+			std::string ext = current->title.substr(p);
+			if (ext == ".mp3")
+				input = new mad_input;
+			else if (ext == ".ogg")
+				input = new vorbis_input;
+			if (input == NULL || input->open(current->fname.c_str())) {
 				warning("Unable to open file");
 				state = STOP;
 				continue;
