@@ -11,6 +11,7 @@
 #include <gtkmm/liststore.h>
 #include <gtkmm/treeview.h>
 #include <dirent.h>
+#include <sys/time.h>
 
 struct song: public Glib::Object {
 	std::string title;
@@ -82,9 +83,71 @@ enum state_enum {
 Glib::RefPtr<Gtk::ListStore> playlist;
 sigc::signal<void> current_changed;
 std::string db_path;
+bool shuffle = false;
+std::vector<Gtk::TreeModel::iterator> history;
+size_t history_pos = 0;
+
 }
 
 playlist_columns playlist_columns;
+
+void set_current()
+{
+	if (current && current_iter) {
+		Gtk::TreeModel::Row row = *current_iter;
+		char stars[11];
+		stars[10] = 0;
+		memset(stars, '*', current->rating);
+		memset(&stars[current->rating], '-', 10-current->rating);
+		row[playlist_columns.rating] = stars;
+	}
+	current_iter = history[history_pos];
+	Gtk::TreeModel::Row row = *current_iter;
+	current = row.get_value(playlist_columns.songptr);
+	reset = true;
+}
+
+int prev_song()
+{
+	if (history_pos == 0)
+		return -1;
+	history_pos--;
+	return 0;
+}
+
+void selected(Gtk::TreeModel::iterator i)
+{
+	if (history_pos + 1 < history.size()) {
+		history.erase(history.begin() + history_pos + 1, history.end());
+	}
+	history_pos = history.size();
+	history.push_back(i);
+}
+
+int next_song()
+{
+	if (history_pos + 1 < history.size()) {
+		history_pos++;
+		return 0;
+	}
+	Gtk::TreeIter i;
+	if (shuffle) {
+		Gtk::TreeModel::Children children = playlist->children();
+		if (children.empty())
+			return -1;
+		i = children[rand() % children.size()];
+	} else if (current_iter) {
+		i = current_iter;
+		i++;
+	} else
+		i = playlist->children().begin();
+	if (!i)
+		return -1;
+
+	history_pos = history.size();
+	history.push_back(i);
+	return 0;
+}
 
 int song::adjust(int d)
 {
@@ -123,22 +186,6 @@ int song::save()
 
 	std::string fname = db_path + '/' + hexlify(sha1);
 	return write_file(fname.c_str(), buf);
-}
-
-void set_current(Gtk::TreeModel::iterator iter)
-{
-	if (current && current_iter) {
-		Gtk::TreeModel::Row row = *current_iter;
-		char stars[11];
-		stars[10] = 0;
-		memset(stars, '*', current->rating);
-		memset(&stars[current->rating], '-', 10-current->rating);
-		row[playlist_columns.rating] = stars;
-	}
-	Gtk::TreeModel::Row row = *iter;
-	current = row.get_value(playlist_columns.songptr);
-	current_iter = iter;
-	reset = true;
 }
 
 player::player() :
@@ -189,12 +236,16 @@ void player::play_clicked()
 {
 	Gtk::TreeModel::iterator i
 		= m_playlist_view.get_selection()->get_selected();
-	if (!i)
-		return;
+	if (i)
+		selected(i);
+	else if (!current) {
+		if (next_song())
+			return;
+	}
 	Glib::Mutex::Lock lock(*play_mutex);
 	if (current)
 		current->adjust((state == PLAYING) ? -2 : -1);
-	set_current(i);
+	set_current();
 	on_current_changed();
 	state = PLAYING;
 	play_cond->signal();
@@ -220,12 +271,11 @@ void player::pause_clicked()
 void player::previous_clicked()
 {
 	Glib::Mutex::Lock lock(*play_mutex);
-	if (!current_iter || current_iter == playlist->children().begin())
+	if (prev_song())
 		return;
-	Gtk::TreeIter i = current_iter;
-	i--;
-	current->adjust((state == PLAYING) ? -2 : -1);
-	set_current(i);
+	if (current)
+		current->adjust((state == PLAYING) ? -2 : -1);
+	set_current();
 	on_current_changed();
 	play_cond->signal();
 }
@@ -233,14 +283,11 @@ void player::previous_clicked()
 void player::next_clicked()
 {
 	Glib::Mutex::Lock lock(*play_mutex);
-	if (!current_iter)
+	if (next_song())
 		return;
-	Gtk::TreeIter i = current_iter;
-	i++;
-	if (!i)
-		return;
-	current->adjust((state == PLAYING) ? -2 : -1);
-	set_current(i);
+	if (current)
+		current->adjust((state == PLAYING) ? -2 : -1);
+	set_current();
 	on_current_changed();
 	play_cond->signal();
 }
@@ -337,10 +384,8 @@ void play_thread()
 			lock.acquire();
 			current->adjust(1);
 			if (current_iter) {
-				Gtk::TreeIter i = current_iter;
-				i++;
-				if (i) {
-					set_current(i);
+				if (next_song() == 0) {
+					set_current();
 					gdk_threads_enter();
 					current_changed.emit();
 					gdk_threads_leave();
@@ -398,18 +443,24 @@ int scan_directory(const std::string &path)
 	DIR *d = opendir(path.c_str());
 	if (d == NULL)
 		return -1;
+	std::vector<std::string> list;
 	while (1) {
 		struct dirent *ent = readdir(d);
 		if (ent == NULL)
 			break;
-		if (ent->d_name[0] == '.') continue;
+		if (ent->d_name[0] != '.')
+			list.push_back(ent->d_name);
+	}
+	closedir(d);
 
-		const std::string fname = path + '/' + ent->d_name;
+	std::sort(list.begin(), list.end());
+
+	for (size_t i = 0; i < list.size(); ++i) {
+		const std::string fname = path + '/' + list[i];
 		if (scan_directory(fname) == 0)
 			continue;
 		add_file(fname);
 	}
-	closedir(d);
 	return 0;
 }
 
@@ -420,6 +471,10 @@ int main(int argc, char **argv)
 	Glib::thread_init();
 	Gtk::Main kit(argc, argv);
 
+	timeval tv;
+	gettimeofday(&tv, NULL);
+	srand(tv.tv_usec);
+
 	db_path = std::string(getenv("HOME")) + "/.japlay2";
 	if (mkdir(db_path.c_str(), 0755) && errno != EEXIST)
 		warning("Unable to create db directory (%s)", strerror(errno));
@@ -429,6 +484,10 @@ int main(int argc, char **argv)
 
 	playlist = Gtk::ListStore::create(playlist_columns);
 	for (int i = 1; i < argc; ++i) {
+		if (strcmp(argv[i], "-s") == 0) {
+			shuffle = true;
+			continue;
+		}
 		if (scan_directory(argv[i]) == 0)
 			continue;
 		add_file(argv[i]);
