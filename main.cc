@@ -1,4 +1,5 @@
 #include "in_mad.h"
+#include "out_alsa.h"
 #include "bencode.h"
 #include "utils.h"
 #include <gtkmm/main.h>
@@ -10,7 +11,6 @@
 #include <gtkmm/liststore.h>
 #include <gtkmm/treeview.h>
 #include <dirent.h>
-#include <ao/ao.h>
 
 struct song: public Glib::Object {
 	std::string title;
@@ -88,8 +88,9 @@ playlist_columns playlist_columns;
 
 int song::adjust(int d)
 {
-	rating += d;
-	rating = std::min(10, std::max(0, rating));
+	int new_rating = std::min(10, std::max(0, rating + d));
+	if (new_rating == rating) return 0;
+	rating = new_rating;
 	return save();
 }
 
@@ -269,17 +270,10 @@ namespace {
 
 void play_thread()
 {
-	ao_sample_format format;
-	memset(&format, 0, sizeof format);
-	format.bits = 16;
-	format.byte_format = AO_FMT_NATIVE;
-	format.rate = 44100;
-	format.channels = 2;
+	const int samplerate = 44100;
 
-	ao_device *dev = NULL;
 	input_plugin *input = NULL;
-
-	ao_initialize();
+	output_plugin *output = NULL;
 
 	std::vector<sample_t> playbuf;
 	size_t played = 0;
@@ -309,11 +303,12 @@ void play_thread()
 			}
 			current->adjust(1);
 		}
-		if (dev == NULL) {
-			dev = ao_open_live(ao_default_driver_id(), &format,
-					   NULL);
-			if (dev == NULL) {
-				warning("Unable to open audio device");
+		if (output == NULL) {
+			output = new alsa_output;
+			if (output->open()) {
+				delete output;
+				output = NULL;
+				warning("Unable to open audio output");
 				state = STOP;
 				continue;
 			}
@@ -328,16 +323,15 @@ void play_thread()
 
 		const int RATING_SEC = 20;
 
-		if (played >= format.rate * RATING_SEC * 2) {
-			played -= format.rate * RATING_SEC * 2;
+		if (played >= samplerate * RATING_SEC * 2) {
+			played -= samplerate * RATING_SEC * 2;
 			current->adjust(1);
 		}
 
 		lock.release();
 		std::vector<sample_t> buf = input->decode();
 		if (buf.empty()) {
-			ao_play(dev, reinterpret_cast<char *>(&playbuf[0]),
-				playbuf.size() * 2);
+			output->play(playbuf);
 			playbuf.clear();
 
 			lock.acquire();
@@ -357,13 +351,18 @@ void play_thread()
 			continue;
 		}
 
-		played += buf.size();
-
 		playbuf.insert(playbuf.end(), buf.begin(), buf.end());
-		if (playbuf.size() >= format.rate / 20 * 2) {
-			ao_play(dev, reinterpret_cast<char *>(&playbuf[0]),
-				playbuf.size() * 2);
-			playbuf.clear();
+		if (playbuf.size() >= samplerate / 5 * 2) {
+			ssize_t ret = output->play(playbuf);
+			if (ret < 0) {
+				delete output;
+				output = NULL;
+				warning("Audio output error");
+				state = STOP;
+				continue;
+			}
+			playbuf.erase(playbuf.begin(), playbuf.begin() + ret);
+			played += ret;
 		}
 	}
 }
@@ -429,8 +428,11 @@ int main(int argc, char **argv)
 	play_cond = new Glib::Cond;
 
 	playlist = Gtk::ListStore::create(playlist_columns);
-	for (int i = 1; i < argc; ++i)
-		scan_directory(argv[i]);
+	for (int i = 1; i < argc; ++i) {
+		if (scan_directory(argv[i]) == 0)
+			continue;
+		add_file(argv[i]);
+	}
 
 	Glib::Thread::create(&play_thread, true);
 
