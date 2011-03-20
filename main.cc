@@ -26,8 +26,6 @@ class player: public Gtk::Window {
 public:
 	player();
 
-	int scan_directory(const std::string &path);
-
 private:
 	Gtk::Button m_play;
 	Gtk::Button m_stop;
@@ -45,13 +43,16 @@ private:
 	void previous_clicked();
 	void next_clicked();
 	bool on_key_press_event(GdkEventKey *event);
+	void on_current_changed();
+	void update_current();
 };
 
 namespace {
 
 Glib::Mutex *play_mutex = NULL;
 Glib::Cond *play_cond = NULL;
-std::string current;
+std::string current_fname;
+std::string current_title;
 Gtk::TreeModel::iterator current_iter;
 int toseek = 0;
 bool reset = false;
@@ -61,7 +62,7 @@ enum state_enum {
 	PLAYING,
 } state = STOP;
 Glib::RefPtr<Gtk::ListStore> playlist;
-
+sigc::signal<void> current_changed;
 }
 
 playlist_columns playlist_columns;
@@ -69,7 +70,8 @@ playlist_columns playlist_columns;
 void set_current(Gtk::TreeModel::iterator iter)
 {
 	Gtk::TreeModel::Row row = *iter;
-	current = row.get_value(playlist_columns.filename).raw();
+	current_fname = row.get_value(playlist_columns.filename).raw();
+	current_title = row.get_value(playlist_columns.title).raw();
 	current_iter = iter;
 	reset = true;
 }
@@ -95,6 +97,9 @@ player::player() :
 	signal_key_press_event()
 		.connect(sigc::mem_fun(*this, &player::on_key_press_event));
 
+	current_changed
+		.connect(sigc::mem_fun(*this, &player::on_current_changed));
+
 	m_buttons.pack_start(m_play);
 	m_buttons.pack_start(m_stop);
 	m_buttons.pack_start(m_pause);
@@ -114,29 +119,6 @@ player::player() :
 	show_all();
 }
 
-int player::scan_directory(const std::string &path)
-{
-	DIR *d = opendir(path.c_str());
-	if (d == NULL)
-		return -1;
-	while (1) {
-		struct dirent *ent = readdir(d);
-		if (ent == NULL)
-			break;
-		if (ent->d_name[0] == '.') continue;
-
-		const std::string fname = path + '/' + ent->d_name;
-		if (scan_directory(fname) == 0)
-			continue;
-
-		Gtk::TreeModel::Row row = *(playlist->append());
-		row[playlist_columns.title] = ent->d_name;
-		row[playlist_columns.filename] = fname;
-	}
-	closedir(d);
-	return 0;
-}
-
 void player::play_clicked()
 {
 	Gtk::TreeModel::iterator i
@@ -145,6 +127,7 @@ void player::play_clicked()
 		return;
 	Glib::Mutex::Lock lock(*play_mutex);
 	set_current(i);
+	update_current();
 	state = PLAYING;
 	play_cond->signal();
 }
@@ -174,6 +157,7 @@ void player::previous_clicked()
 	Gtk::TreeIter i = current_iter;
 	i--;
 	set_current(i);
+	update_current();
 	play_cond->signal();
 }
 
@@ -186,6 +170,7 @@ void player::next_clicked()
 	i++;
 	if (i) {
 		set_current(i);
+		update_current();
 		play_cond->signal();
 	}
 }
@@ -206,6 +191,18 @@ bool player::on_key_press_event(GdkEventKey *event)
 	return true;
 }
 
+void player::update_current()
+{
+	set_title(current_title);
+}
+
+void player::on_current_changed()
+{
+	gdk_threads_enter();
+	update_current();
+	gdk_threads_leave();
+}
+
 namespace {
 
 void play_thread()
@@ -218,15 +215,18 @@ void play_thread()
 	format.channels = 2;
 
 	ao_device *dev = NULL;
-	mad_input *input = NULL;
+	input_plugin *input = NULL;
 
 	ao_initialize();
+
+	std::vector<sample_t> playbuf;
 
 	while (1) {
 		Glib::Mutex::Lock lock(*play_mutex);
 
 		if (reset || state == STOP) {
 			toseek = 0;
+			playbuf.clear();
 			delete input;
 			input = NULL;
 			reset = false;
@@ -238,7 +238,7 @@ void play_thread()
 
 		if (input == NULL) {
 			input = new mad_input;
-			if (input->open(current.c_str())) {
+			if (input->open(current_fname.c_str())) {
 				warning("Unable to open file");
 				state = STOP;
 				continue;
@@ -264,21 +264,54 @@ void play_thread()
 		lock.release();
 		std::vector<sample_t> buf = input->decode();
 		if (buf.empty()) {
+			ao_play(dev, reinterpret_cast<char *>(&playbuf[0]),
+				playbuf.size() * 2);
+			playbuf.clear();
+
 			lock.acquire();
 			if (current_iter) {
 				Gtk::TreeIter i = current_iter;
 				i++;
-				if (i)
+				if (i) {
 					set_current(i);
-				else
+					current_changed.emit();
+				} else
 					state = STOP;
 			} else
 				state = STOP;
 			continue;
 		}
 
-		ao_play(dev, reinterpret_cast<char *>(&buf[0]), buf.size() * 2);
+		playbuf.insert(playbuf.end(), buf.begin(), buf.end());
+		if (playbuf.size() >= 4410*2) {
+			ao_play(dev, reinterpret_cast<char *>(&playbuf[0]),
+				playbuf.size() * 2);
+			playbuf.clear();
+		}
 	}
+}
+
+int scan_directory(const std::string &path)
+{
+	DIR *d = opendir(path.c_str());
+	if (d == NULL)
+		return -1;
+	while (1) {
+		struct dirent *ent = readdir(d);
+		if (ent == NULL)
+			break;
+		if (ent->d_name[0] == '.') continue;
+
+		const std::string fname = path + '/' + ent->d_name;
+		if (scan_directory(fname) == 0)
+			continue;
+
+		Gtk::TreeModel::Row row = *(playlist->append());
+		row[playlist_columns.title] = ent->d_name;
+		row[playlist_columns.filename] = fname;
+	}
+	closedir(d);
+	return 0;
 }
 
 }
@@ -292,12 +325,12 @@ int main(int argc, char **argv)
 	play_cond = new Glib::Cond;
 
 	playlist = Gtk::ListStore::create(playlist_columns);
+	for (int i = 1; i < argc; ++i)
+		scan_directory(argv[i]);
 
 	Glib::Thread::create(&play_thread, true);
 
 	player player;
-	for (int i = 1; i < argc; ++i)
-		player.scan_directory(argv[i]);
 	Gtk::Main::run(player);
 
 	return 0;

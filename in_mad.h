@@ -2,20 +2,17 @@
 #define _IN_MAD_H
 
 #include "common.h"
-#include <vector>
 #include <string>
 #include <stdio.h>
 #include <mad.h>
 
-class mad_input {
+class mad_input: public input_plugin {
 public:
 	mad_input();
 	~mad_input();
 
 	int open(const char *fname);
-
 	int seek(int msec);
-
 	std::vector<sample_t> decode();
 
 private:
