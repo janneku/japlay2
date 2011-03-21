@@ -1,8 +1,9 @@
 #include "in_mad.h"
+#include "common.h"
 #include "in_vorbis.h"
 #include "out_alsa.h"
-#include "bencode.h"
 #include "utils.h"
+#include <cppbencode/bencode.h>
 #include <gtkmm/main.h>
 #include <gtkmm/window.h>
 #include <gtkmm/button.h>
