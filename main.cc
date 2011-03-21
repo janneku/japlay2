@@ -14,6 +14,19 @@
 #include <dirent.h>
 #include <sys/time.h>
 
+class song_ptr: public Glib::Object
+{
+public:
+	song_ptr(const ptr<song> &song) :
+		m_song(song)
+	{}
+
+	ptr<song> get_song() const { return m_song; }
+
+private:
+	ptr<song> m_song;
+};
+
 class playlist_columns: public Gtk::TreeModel::ColumnRecord {
 public:
 	playlist_columns()
@@ -25,7 +38,7 @@ public:
 
 	Gtk::TreeModelColumn<Glib::ustring> title;
 	Gtk::TreeModelColumn<Glib::ustring> rating;
-	Gtk::TreeModelColumn<ptr<song> > songptr;
+	Gtk::TreeModelColumn<Glib::RefPtr<song_ptr> > songptr;
 };
 
 class player: public Gtk::Window {
@@ -88,7 +101,7 @@ void set_current()
 	}
 	current_iter = history[history_pos];
 	Gtk::TreeModel::Row row = *current_iter;
-	current = row.get_value(playlist_columns.songptr);
+	current = row.get_value(playlist_columns.songptr)->get_song();
 	reset = true;
 }
 
@@ -204,6 +217,7 @@ player::player() :
 	m_buttons.pack_start(m_next);
 
 	m_playlist_view.set_model(playlist);
+	m_playlist_view.set_reorderable();
 	m_playlist_view.append_column("Rating", playlist_columns.rating);
 	m_playlist_view.append_column("Title", playlist_columns.title);
 
@@ -431,10 +445,12 @@ void add_file(const std::string &fname)
 	memset(stars, '*', song->rating);
 	memset(&stars[song->rating], '-', 10-song->rating);
 
+	Glib::RefPtr<song_ptr> songptr(new song_ptr(song));
+
 	Gtk::TreeModel::Row row = *(playlist->append());
 	row[playlist_columns.title] = fname.substr(p + 1);
 	row[playlist_columns.rating] = stars;
-	row[playlist_columns.songptr] = song;
+	row[playlist_columns.songptr] = songptr;
 }
 
 int scan_directory(const std::string &path)

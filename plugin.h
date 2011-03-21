@@ -48,5 +48,4 @@ public:
 			     const std::vector<sample_t> &buf) = 0;
 };
 
-
 #endif
