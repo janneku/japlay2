@@ -387,9 +387,9 @@ void play_thread()
 		if (output == NULL || memcmp(&fmt, &new_fmt, sizeof fmt) != 0) {
 			if (output)
 				output->play(fmt, playbuf);
-			delete output;
-			output = new alsa_output;
-			if (output->open(new_fmt)) {
+			else
+				output = new alsa_output;
+			if (output->set_format(new_fmt)) {
 				delete output;
 				output = NULL;
 				warning("Unable to open audio output");

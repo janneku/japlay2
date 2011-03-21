@@ -43,7 +43,7 @@ class output_plugin {
 public:
 	virtual ~output_plugin() {}
 
-	virtual int open(const audio_format &fmt) = 0;
+	virtual int set_format(const audio_format &fmt) = 0;
 	virtual ssize_t play(const audio_format &fmt,
 			     const std::vector<sample_t> &buf) = 0;
 };

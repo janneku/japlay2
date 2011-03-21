@@ -11,8 +11,13 @@ alsa_output::~alsa_output()
 		snd_pcm_close(m_pcm);
 }
 
-int alsa_output::open(const audio_format &fmt)
+int alsa_output::set_format(const audio_format &fmt)
 {
+	if (m_pcm) {
+		snd_pcm_drain(m_pcm);
+		snd_pcm_close(m_pcm);
+	}
+	m_pcm = NULL;
 	if (snd_pcm_open(&m_pcm, "default", SND_PCM_STREAM_PLAYBACK, 0))
 		return -1;
 	if (snd_pcm_set_params(m_pcm, SND_PCM_FORMAT_S16_LE,

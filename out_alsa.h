@@ -9,7 +9,7 @@ public:
 	alsa_output();
 	~alsa_output();
 
-	int open(const audio_format &fmt);
+	int set_format(const audio_format &fmt);
 	ssize_t play(const audio_format &fmt, const std::vector<sample_t> &buf);
 
 private:
