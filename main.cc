@@ -7,6 +7,7 @@
 #include <gtkmm/main.h>
 #include <gtkmm/window.h>
 #include <gtkmm/button.h>
+#include <gtkmm/entry.h>
 #include <gtkmm/stock.h>
 #include <gtkmm/box.h>
 #include <gtkmm/scrolledwindow.h>
@@ -54,6 +55,7 @@ private:
 	Gtk::Button m_next;
 	Gtk::HBox m_buttons;
 	Gtk::VBox m_layout;
+	Gtk::Entry m_search;
 	Gtk::ScrolledWindow m_scrolledwin;
 	Gtk::TreeView m_playlist_view;
 
@@ -64,6 +66,7 @@ private:
 	void next_clicked();
 	bool on_key_press_event(GdkEventKey *event);
 	void on_current_changed();
+	void search_activated();
 };
 
 namespace {
@@ -89,6 +92,13 @@ size_t history_pos = 0;
 }
 
 playlist_columns playlist_columns;
+
+std::string lower(const std::string &s)
+{
+	std::string out(s);
+	std::transform(out.begin(), out.end(), out.begin(), tolower);
+	return out;
+}
 
 void set_current()
 {
@@ -194,6 +204,8 @@ player::player() :
 	m_previous(Gtk::Stock::MEDIA_PREVIOUS),
 	m_next(Gtk::Stock::MEDIA_NEXT)
 {
+	set_title("japlay2");
+
 	m_play.signal_clicked()
 		.connect(sigc::mem_fun(*this, &player::play_clicked));
 	m_stop.signal_clicked()
@@ -205,9 +217,6 @@ player::player() :
 	m_next.signal_clicked()
 		.connect(sigc::mem_fun(*this, &player::next_clicked));
 
-	signal_key_press_event()
-		.connect(sigc::mem_fun(*this, &player::on_key_press_event));
-
 	current_changed
 		.connect(sigc::mem_fun(*this, &player::on_current_changed));
 
@@ -218,18 +227,21 @@ player::player() :
 	m_buttons.pack_start(m_next);
 
 	m_playlist_view.set_model(playlist);
-	m_playlist_view.set_reorderable();
 	m_playlist_view.append_column("Rating", playlist_columns.rating);
 	m_playlist_view.append_column("Title", playlist_columns.title);
 
 	m_scrolledwin.set_policy(Gtk::POLICY_AUTOMATIC, Gtk::POLICY_AUTOMATIC);
 	m_scrolledwin.add(m_playlist_view);
 
+	m_search.signal_activate()
+		.connect(sigc::mem_fun(*this, &player::search_activated));
+
 	m_layout.pack_start(m_buttons, Gtk::PACK_SHRINK);
 	m_layout.pack_start(m_scrolledwin);
+	m_layout.pack_start(m_search, Gtk::PACK_SHRINK);
 
 	add(m_layout);
-	show_all();
+	show_all_children();
 }
 
 void player::play_clicked()
@@ -295,22 +307,52 @@ void player::next_clicked()
 bool player::on_key_press_event(GdkEventKey *event)
 {
 	Glib::Mutex::Lock lock(*play_mutex);
-	if (state != PLAYING && state != PAUSED)
-		return true;
-	if (event->keyval == GDK_KEY_Left)
+	if (state != PLAYING && state != PAUSED) {
+		return Gtk::Window::on_key_press_event(event);
+	}
+	switch (event->keyval) {
+	case GDK_KEY_Left:
 		toseek -= 10;
-	if (event->keyval == GDK_KEY_Right)
+		break;
+	case GDK_KEY_Right:
 		toseek += 10;
-	if (event->keyval == GDK_KEY_Up)
+		break;
+	case GDK_KEY_Up:
 		toseek += 60;
-	if (event->keyval == GDK_KEY_Down)
+		break;
+	case GDK_KEY_Down:
 		toseek -= 60;
+		break;
+	default:
+		return Gtk::Window::on_key_press_event(event);
+	}
 	return true;
 }
 
 void player::on_current_changed()
 {
-	set_title(current->title);
+	set_title("japlay2 - " + current->title);
+}
+
+void player::search_activated()
+{
+	Gtk::TreeModel::iterator i
+		= m_playlist_view.get_selection()->get_selected();
+	if (i)
+		i++;
+	else
+		i = playlist->children().begin();
+	std::string s = lower(m_search.get_text());
+	while (i) {
+		Gtk::TreeModel::Row row = *i;
+		ptr<song> song =
+			row.get_value(playlist_columns.songptr)->get_song();
+		if (lower(song->title).find(s) != std::string::npos) {
+			m_playlist_view.set_cursor(playlist->get_path(i));
+			break;
+		}
+		i++;
+	}
 }
 
 namespace {
