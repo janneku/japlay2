@@ -34,7 +34,7 @@ long vorbis_input::tell_cb(void *datasource)
 	return ftell(input->m_file);
 }
 
-int vorbis_input::open(const char *fname)
+int vorbis_input::open(song *song)
 {
 	static ov_callbacks callbacks;
 	memset(&callbacks, 0, sizeof callbacks);
@@ -43,7 +43,7 @@ int vorbis_input::open(const char *fname)
 	callbacks.tell_func = &vorbis_input::tell_cb;
 
 	assert(m_file == NULL);
-	m_file = fopen(fname, "rb");
+	m_file = fopen(song->fname.c_str(), "rb");
 	if (m_file == NULL)
 		return -1;
 	if (ov_open_callbacks(this, &m_vf, NULL, 0, callbacks))

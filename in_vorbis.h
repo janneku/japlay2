@@ -11,7 +11,7 @@ public:
 	vorbis_input();
 	~vorbis_input();
 
-	int open(const char *fname);
+	int open(song *song);
 	int seek(int sec);
 	std::vector<sample_t> decode(audio_format *fmt);
 

@@ -14,22 +14,6 @@
 #include <dirent.h>
 #include <sys/time.h>
 
-struct song: public Glib::Object {
-	std::string title;
-	std::string fname;
-	std::string sha1;
-	int rating;
-
-	int adjust(int d);
-
-	song() :
-		rating(5)
-	{
-	}
-	int load();
-	int save();
-};
-
 class playlist_columns: public Gtk::TreeModel::ColumnRecord {
 public:
 	playlist_columns()
@@ -41,7 +25,7 @@ public:
 
 	Gtk::TreeModelColumn<Glib::ustring> title;
 	Gtk::TreeModelColumn<Glib::ustring> rating;
-	Gtk::TreeModelColumn<Glib::RefPtr<song> > songptr;
+	Gtk::TreeModelColumn<ptr<song> > songptr;
 };
 
 class player: public Gtk::Window {
@@ -72,7 +56,7 @@ namespace {
 
 Glib::Mutex *play_mutex = NULL;
 Glib::Cond *play_cond = NULL;
-Glib::RefPtr<song> current;
+ptr<song> current;
 Gtk::TreeModel::iterator current_iter;
 int toseek = 0;
 bool reset = false;
@@ -94,7 +78,7 @@ playlist_columns playlist_columns;
 
 void set_current()
 {
-	if (current && current_iter) {
+	if (!current.is_null() && current_iter) {
 		Gtk::TreeModel::Row row = *current_iter;
 		char stars[11];
 		stars[10] = 0;
@@ -239,12 +223,12 @@ void player::play_clicked()
 		= m_playlist_view.get_selection()->get_selected();
 	if (i)
 		selected(i);
-	else if (!current) {
+	else if (current.is_null()) {
 		if (next_song())
 			return;
 	}
 	Glib::Mutex::Lock lock(*play_mutex);
-	if (current)
+	if (!current.is_null())
 		current->adjust((state == PLAYING) ? -2 : -1);
 	set_current();
 	on_current_changed();
@@ -274,7 +258,7 @@ void player::previous_clicked()
 	Glib::Mutex::Lock lock(*play_mutex);
 	if (prev_song())
 		return;
-	if (current)
+	if (!current.is_null())
 		current->adjust((state == PLAYING) ? -2 : -1);
 	set_current();
 	on_current_changed();
@@ -286,7 +270,7 @@ void player::next_clicked()
 	Glib::Mutex::Lock lock(*play_mutex);
 	if (next_song())
 		return;
-	if (current)
+	if (!current.is_null())
 		current->adjust((state == PLAYING) ? -2 : -1);
 	set_current();
 	on_current_changed();
@@ -348,7 +332,7 @@ void play_thread()
 				input = new mad_input;
 			else if (ext == ".ogg")
 				input = new vorbis_input;
-			if (input == NULL || input->open(current->fname.c_str())) {
+			if (input == NULL || input->open(current.data())) {
 				warning("Unable to open file");
 				state = STOP;
 				continue;
@@ -436,7 +420,7 @@ void add_file(const std::string &fname)
 
 	size_t p = fname.rfind('/');
 
-	Glib::RefPtr<song> song(new class song);
+	ptr<song> song(new class song);
 	song->title = fname.substr(p + 1);
 	song->fname = fname;
 	song->sha1 = sha1;

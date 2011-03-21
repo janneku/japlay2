@@ -1,11 +1,29 @@
 #ifndef _PLUGIN_H
 #define _PLUGIN_H
 
+#include "smart_ptr.h"
+#include <string>
 #include <stdint.h>
 #include <vector>
 #include <stdio.h>
 
 typedef int16_t sample_t;
+
+struct song {
+	std::string title;
+	std::string fname;
+	std::string sha1;
+	int rating;
+
+	int adjust(int d);
+
+	song() :
+		rating(5)
+	{
+	}
+	int load();
+	int save();
+};
 
 struct audio_format {
 	int samplerate;
@@ -16,7 +34,7 @@ class input_plugin {
 public:
 	virtual ~input_plugin() {}
 
-	virtual int open(const char *fname) = 0;
+	virtual int open(song *song) = 0;
 	virtual int seek(int sec) { return -1; }
 	virtual std::vector<sample_t> decode(audio_format *fmt) = 0;
 };

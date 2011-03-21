@@ -18,10 +18,10 @@ mad_input::~mad_input()
 	mad_synth_finish(&m_synth);
 }
 
-int mad_input::open(const char *fname)
+int mad_input::open(song *song)
 {
 	assert(m_file == NULL);
-	m_file = fopen(fname, "rb");
+	m_file = fopen(song->fname.c_str(), "rb");
 	if (m_file == NULL)
 		return -1;
 	fill_readbuf();
