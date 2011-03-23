@@ -9,6 +9,9 @@ public:
 	ui_lock();
 	~ui_lock();
 
+	void release();
+	void acquire();
+
 private:
 	bool m_locked;
 };

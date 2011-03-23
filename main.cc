@@ -138,6 +138,7 @@ void selected(Gtk::TreeModel::iterator i)
 
 int next_song()
 {
+	ui_lock l;
 	if (history_pos + 1 < history.size()) {
 		history_pos++;
 		return 0;
@@ -164,16 +165,27 @@ int next_song()
 ui_lock::ui_lock() :
 	m_locked(false)
 {
-	if (Glib::Thread::self() != ui_thread) {
-		gdk_threads_enter();
-		m_locked = true;
-	}
+	acquire();
 }
 
 ui_lock::~ui_lock()
 {
+	release();
+}
+
+void ui_lock::release()
+{
 	if (m_locked)
 		gdk_threads_leave();
+	m_locked = false;
+}
+
+void ui_lock::acquire()
+{
+	if (!m_locked && Glib::Thread::self() != ui_thread) {
+		gdk_threads_enter();
+		m_locked = true;
+	}
 }
 
 int song::adjust(int d)
@@ -545,8 +557,10 @@ int scan_directory(const std::string &path)
 
 int main(int argc, char **argv)
 {
-	Glib::thread_init();
 	Gtk::Main kit(argc, argv);
+
+	Glib::thread_init();
+	gdk_threads_init();
 
 	timeval tv;
 	gettimeofday(&tv, NULL);
