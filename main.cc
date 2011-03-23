@@ -2,6 +2,7 @@
 #include "common.h"
 #include "in_vorbis.h"
 #include "out_alsa.h"
+#include "out_scope.h"
 #include "utils.h"
 #include <cppbencode/bencode.h>
 #include <gtkmm/main.h>
@@ -578,6 +579,8 @@ int main(int argc, char **argv)
 		std::string arg = argv[i];
 		if (arg == "-s") {
 			shuffle = true;
+		} else if (arg == "-v") {
+			vis = new scope_output;
 		} else {
 			if (scan_directory(argv[i]) == 0)
 				continue;
