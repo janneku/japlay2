@@ -88,6 +88,8 @@ std::string db_path;
 bool shuffle = false;
 std::vector<Gtk::TreeModel::iterator> history;
 size_t history_pos = 0;
+output_plugin *vis = NULL;
+Glib::Thread *ui_thread;
 
 }
 
@@ -95,8 +97,9 @@ playlist_columns playlist_columns;
 
 std::string lower(const std::string &s)
 {
-	std::string out(s);
-	std::transform(out.begin(), out.end(), out.begin(), tolower);
+	std::string out(s.size(), 0);
+	for (size_t i = 0; i < s.size(); ++i)
+		out[i] = tolower(s[i]);
 	return out;
 }
 
@@ -156,6 +159,21 @@ int next_song()
 	history_pos = history.size();
 	history.push_back(i);
 	return 0;
+}
+
+ui_lock::ui_lock() :
+	m_locked(false)
+{
+	if (Glib::Thread::self() != ui_thread) {
+		gdk_threads_enter();
+		m_locked = true;
+	}
+}
+
+ui_lock::~ui_lock()
+{
+	if (m_locked)
+		gdk_threads_leave();
 }
 
 int song::adjust(int d)
@@ -331,6 +349,7 @@ bool player::on_key_press_event(GdkEventKey *event)
 
 void player::on_current_changed()
 {
+	ui_lock l;
 	set_title("japlay2 - " + current->title);
 }
 
@@ -416,9 +435,7 @@ void play_thread()
 			if (current_iter) {
 				if (next_song() == 0) {
 					set_current();
-					gdk_threads_enter();
 					current_changed.emit();
-					gdk_threads_leave();
 				} else
 					state = STOP;
 			} else
@@ -445,7 +462,7 @@ void play_thread()
 
 		playbuf.insert(playbuf.end(), buf.begin(), buf.end());
 
-		if (playbuf.size() >= fmt.samplerate / 5 * fmt.channels) {
+		if (playbuf.size() >= fmt.samplerate / 20 * fmt.channels) {
 			ssize_t ret = output->play(fmt, playbuf);
 			if (ret < 0) {
 				delete output;
@@ -454,6 +471,8 @@ void play_thread()
 				state = STOP;
 				continue;
 			}
+			if (vis)
+				vis->play(fmt, playbuf);
 			playbuf.erase(playbuf.begin(), playbuf.begin() + ret);
 			played += ret;
 		}
@@ -542,21 +561,23 @@ int main(int argc, char **argv)
 
 	playlist = Gtk::ListStore::create(playlist_columns);
 	for (int i = 1; i < argc; ++i) {
-		if (strcmp(argv[i], "-s") == 0) {
+		std::string arg = argv[i];
+		if (arg == "-s") {
 			shuffle = true;
-			continue;
+		} else {
+			if (scan_directory(argv[i]) == 0)
+				continue;
+			add_file(argv[i]);
 		}
-		if (scan_directory(argv[i]) == 0)
-			continue;
-		add_file(argv[i]);
 	}
+
+	ui_thread = Glib::Thread::self();
 
 	Glib::Thread::create(&play_thread, true);
 
 	player player;
 	gdk_threads_enter();
 	Gtk::Main::run(player);
-	gdk_threads_leave();
 
 	return 0;
 }

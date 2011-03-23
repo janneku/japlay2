@@ -30,6 +30,7 @@ int alsa_output::set_format(const audio_format &fmt)
 ssize_t alsa_output::play(const audio_format &fmt,
 			  const std::vector<sample_t> &buf)
 {
+	assert(buf.size() % fmt.channels == 0);
 	while (1) {
 		snd_pcm_sframes_t ret =
 		  snd_pcm_writei(m_pcm, buf.data(), buf.size() / fmt.channels);
