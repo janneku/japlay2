@@ -173,9 +173,9 @@ int song::load()
 	if (buf.empty())
 		return -1;
 
-	variant v;
-	variant_map d;
-	if (bdecoder::decode_all(&v, buf) ||
+	ben::variant v;
+	ben::variant_map d;
+	if (ben::decoder::decode_all(&v, buf) ||
 	    v.get(&d) ||
 	    d.get("rating").get(&rating)) {
 		warning("Corrupted file: %s", fname.c_str());
@@ -187,11 +187,11 @@ int song::load()
 
 int song::save()
 {
-	variant_map d;
+	ben::variant_map d;
 	d.insert("rating", rating);
 
 	std::string buf;
-	bencode(&buf, d);
+	ben::encode(&buf, d);
 
 	std::string fname = db_path + '/' + hexlify(sha1);
 	return write_file(fname.c_str(), buf);
