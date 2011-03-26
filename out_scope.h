@@ -12,6 +12,7 @@ public:
 
 private:
 	std::vector<sample_t> m_wave;
+	float m_peak;
 
 	bool on_expose_event(GdkEventExpose *event);
 };

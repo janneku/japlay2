@@ -4,10 +4,14 @@
 const size_t SAMPLES = 512;
 
 scope::scope() :
-	m_wave(SAMPLES, 0)
+	m_wave(SAMPLES, 0), m_peak(0)
 {
 	set_default_size(SAMPLES, 128);
 	set_title("japlay2 scope");
+
+	realize();
+	Glib::RefPtr<Gdk::Window> window = get_window();
+	window->set_background(Gdk::Color("Black"));
 }
 
 void scope::add(const audio_format &fmt, const std::vector<sample_t> &buf)
@@ -36,8 +40,31 @@ bool scope::on_expose_event(GdkEventExpose *event)
 		      event->area.width, event->area.height);
 	cr->clip();
 
-	cr->set_source_rgb(0, 0, 0);
-	cr->move_to(0, 128);
+	float energy = 0;
+	for (size_t i = 1; i < SAMPLES; ++i) {
+		energy += (abs(m_wave[i] - m_wave[i - 1]) + abs(m_wave[i]) / 2)
+			/ 65536.0;
+	}
+	energy *= 1.0 / SAMPLES;
+
+	m_peak += (energy - m_peak) * 0.1;
+
+	energy /= m_peak;
+
+	float r = std::min(energy - 1, 1.0f);
+	float g = std::max(std::min(3 - energy, 1.0f), 0.0f);
+
+	cr->set_line_width(1);
+	cr->set_source_rgb(r * 0.5, g * 0.5, 0);
+	for (size_t i = 0; i < 4; ++i) {
+		cr->move_to(0, i * 32);
+		cr->line_to(SAMPLES, i * 32);
+	}
+	cr->stroke();
+
+	cr->set_line_width(energy);
+	cr->set_source_rgb(r, g, 0);
+	cr->move_to(0, 64);
 	for (size_t i = 0; i < SAMPLES; ++i) {
 		cr->line_to(i, m_wave[i] / 512 + 64);
 	}
