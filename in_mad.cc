@@ -45,7 +45,7 @@ int mad_input::fill_readbuf()
 		const char *p =
 			reinterpret_cast<const char *>(m_stream.next_frame);
 		size_t pos = p - m_readbuf.data();
-		m_readbuf = m_readbuf.substr(pos);
+		m_readbuf.erase(m_readbuf.begin(), m_readbuf.begin() + pos);
 	}
 
 	size_t toread = 16384 - m_readbuf.size();
