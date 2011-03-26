@@ -1,17 +1,34 @@
 #include "out_scope.h"
 #include "common.h"
 
-const size_t SAMPLES = 512;
+static double complex_abs(fftw_complex c)
+{
+	return sqrtf(c[0] * c[0] + c[1] * c[1]);
+}
 
 scope::scope() :
-	m_wave(SAMPLES, 0), m_peak(0)
+	m_peak(0), m_freq(false), m_dft(NULL)
 {
+	memset(m_wave, 0, sizeof m_wave);
+
 	set_default_size(SAMPLES, 128);
 	set_title("japlay2 scope");
+
+	add_events(Gdk::BUTTON_PRESS_MASK);
+
+	/* hanning window */
+	for (size_t i = 0; i < SAMPLES; ++i)
+		m_window[i] = 0.5 * (1.0 - cosf(2 * M_PI * i / SAMPLES));
 
 	realize();
 	Glib::RefPtr<Gdk::Window> window = get_window();
 	window->set_background(Gdk::Color("Black"));
+}
+
+scope::~scope()
+{
+	if (m_dft)
+		fftw_destroy_plan(m_dft);
 }
 
 void scope::add(const audio_format &fmt, const std::vector<sample_t> &buf)
@@ -20,15 +37,28 @@ void scope::add(const audio_format &fmt, const std::vector<sample_t> &buf)
 	if (frames < SAMPLES)
 		return;
 	if (fmt.channels == 1) {
-		memcpy(&m_wave[0], &buf[buf.size() - SAMPLES], SAMPLES * 2);
+		size_t j = frames - SAMPLES;
+		for (size_t i = 0; i < SAMPLES; ++i)
+			m_wave[i] = buf[j++] / 32768.0;
 	} else if (fmt.channels == 2) {
 		/* convert to mono by taking average of both channels */
 		size_t j = frames - SAMPLES;
 		for (size_t i = 0; i < SAMPLES; ++i) {
-			m_wave[i] = (buf[j*2] + buf[j*2+1]) / 2;
+			m_wave[i] = (buf[j*2] + buf[j*2+1]) / (32768.0 * 2);
 			j++;
 		}
 	}
+
+	if (m_freq) {
+		for (size_t i = 0; i < SAMPLES; ++i)
+			m_wave[i] *= m_window[i];
+		if (m_dft == NULL) {
+			m_dft = fftw_plan_dft_r2c_1d(SAMPLES, m_wave, m_complex,
+						     FFTW_ESTIMATE);
+		}
+		fftw_execute(m_dft);
+	}
+
 	queue_draw();
 }
 
@@ -42,8 +72,7 @@ bool scope::on_expose_event(GdkEventExpose *event)
 
 	float energy = 0;
 	for (size_t i = 1; i < SAMPLES; ++i) {
-		energy += (abs(m_wave[i] - m_wave[i - 1]) + abs(m_wave[i]) / 2)
-			/ 65536.0;
+		energy += (fabs(m_wave[i] - m_wave[i - 1]) + fabs(m_wave[i]) / 2);
 	}
 	energy *= 1.0 / SAMPLES;
 
@@ -66,10 +95,19 @@ bool scope::on_expose_event(GdkEventExpose *event)
 	cr->set_source_rgb(r, g, 0);
 	cr->move_to(0, 64);
 	for (size_t i = 0; i < SAMPLES; ++i) {
-		cr->line_to(i, m_wave[i] / 512 + 64);
+		if (m_freq)
+			cr->line_to(i, 120 - complex_abs(m_complex[i / 2]) * 10);
+		else
+			cr->line_to(i, m_wave[i] * 64 + 64);
 	}
 	cr->stroke();
 	return false;
+}
+
+bool scope::on_button_press_event(GdkEventButton *event)
+{
+	m_freq = !m_freq;
+	return true;
 }
 
 scope_output::scope_output()

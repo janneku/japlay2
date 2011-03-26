@@ -9,3 +9,5 @@ Requirements:
 - libmad
 - libvorbis
 - gtkmm 2.x
+- OpenSSL
+- fftw3
