@@ -96,10 +96,10 @@ sample_t mad_input::scale(unsigned int bits, mad_fixed_t sample,
 	dither->error[0] = sample - output;
 
 	/* clip */
-	if (sample >= MAD_F_ONE)
-		sample = MAD_F_ONE - 1;
-	else if (sample < -MAD_F_ONE)
-		sample = -MAD_F_ONE;
+	if (output >= MAD_F_ONE)
+		output = MAD_F_ONE - 1;
+	else if (output < -MAD_F_ONE)
+		output = -MAD_F_ONE;
 
 	/* scale */
 	return output >> scalebits;
