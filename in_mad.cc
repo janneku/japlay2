@@ -1,12 +1,23 @@
 #include "in_mad.h"
 #include <assert.h>
 
+#define NOISE_SHAPING
+
+namespace {
+unsigned long prng(unsigned long state)
+{
+	return (state * 0x0019660dL + 0x3c6ef35fL) & 0xffffffffL;
+}
+}
+
 mad_input::mad_input() :
 	m_file(NULL), m_bitrate(128000)
 {
 	mad_frame_init(&m_frame);
 	mad_stream_init(&m_stream);
 	mad_synth_init(&m_synth);
+	memset(&m_left_dither, 0, sizeof(m_left_dither));
+	memset(&m_right_dither, 0, sizeof(m_right_dither));
 }
 
 mad_input::~mad_input()
@@ -53,10 +64,30 @@ int mad_input::fill_readbuf()
 	return 0;
 }
 
-sample_t mad_input::scale(mad_fixed_t sample)
+#ifdef NOISE_SHAPING
+sample_t mad_input::scale(unsigned int bits, mad_fixed_t sample,
+			  audio_dither *dither)
 {
-	/* round */
-	sample += (1L << (MAD_F_FRACBITS - 16));
+	unsigned int scalebits;
+	mad_fixed_t output, mask, random;
+
+	/* noise shape */
+	sample += dither->error[0] - dither->error[1] + dither->error[2];
+
+	dither->error[2] = dither->error[1];
+	dither->error[1] = dither->error[0] / 2;
+
+	/* bias */
+	output = sample + (1L << (MAD_F_FRACBITS + 1 - bits - 1));
+
+	scalebits = MAD_F_FRACBITS + 1 - bits;
+	mask = (1L << scalebits) - 1;
+
+	/* dither */
+	random  = prng(dither->random);
+	output += (random & mask) - (dither->random & mask);
+
+	dither->random = random;
 
 	/* clip */
 	if (sample >= MAD_F_ONE)
@@ -65,8 +96,31 @@ sample_t mad_input::scale(mad_fixed_t sample)
 		sample = -MAD_F_ONE;
 
 	/* quantize */
-	return sample >> (MAD_F_FRACBITS + 1 - 16);
+	output &= ~mask;
+
+	/* error feedback */
+	dither->error[0] = sample - output;
+
+	/* scale */
+	return output >> scalebits;
 }
+#else
+sample_t mad_input::scale(unsigned int bits, mad_fixed_t sample,
+			  audio_dither *dither)
+{
+	/* round */
+	sample += (1L << (MAD_F_FRACBITS - bits));
+
+	/* clip */
+	if (sample >= MAD_F_ONE)
+		sample = MAD_F_ONE - 1;
+	else if (sample < -MAD_F_ONE)
+		sample = -MAD_F_ONE;
+
+	/* quantize */
+	return sample >> (MAD_F_FRACBITS + 1 - bits);
+}
+#endif
 
 int mad_input::seek(int sec)
 {
@@ -122,12 +176,15 @@ std::vector<sample_t> mad_input::decode(audio_format *fmt)
 		std::vector<sample_t> buf(m_synth.pcm.length * fmt->channels, 0);
 		if (fmt->channels == 2) {
 			for (size_t i = 0; i < m_synth.pcm.length; ++i) {
-				buf[i*2] = scale(m_synth.pcm.samples[0][i]);
-				buf[i*2+1] = scale(m_synth.pcm.samples[1][i]);
+				buf[i*2] = scale(16, m_synth.pcm.samples[0][i],
+						 &m_left_dither);
+				buf[i*2+1] = scale(16, m_synth.pcm.samples[1][i],
+						   &m_right_dither);
 			}
 		} else {
 			for (size_t i = 0; i < m_synth.pcm.length; ++i) {
-				buf[i] = scale(m_synth.pcm.samples[0][i]);
+				buf[i] = scale(16, m_synth.pcm.samples[0][i],
+					       &m_left_dither);
 			}
 		}
 		return buf;
